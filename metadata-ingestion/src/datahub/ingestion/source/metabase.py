@@ -28,6 +28,7 @@ from datahub.ingestion.api.decorators import (
 )
 from datahub.ingestion.api.source import MetadataWorkUnitProcessor, SourceReport
 from datahub.ingestion.api.workunit import MetadataWorkUnit
+from datahub.ingestion.source.bigquery_v2.bigquery_audit import BigqueryTableIdentifier
 from datahub.ingestion.source.state.stale_entity_removal_handler import (
     StaleEntityRemovalHandler,
     StaleEntityRemovalSourceReport,
@@ -646,6 +647,24 @@ class MetabaseSource(StatefulIngestionSourceBase):
                 # the question is built directly from table in DB
                 schema_name, table_name = self.get_source_table_from_id(source_table_id)
                 if table_name:
+                    if (
+                        platform == "bigquery"
+                        and schema_name == database_name
+                        and "." in table_name
+                    ):
+                        # Metabase BigQuery metadata sometimes stores the project in schema
+                        # and dataset.table (or project.dataset.table) in name.
+                        try:
+                            bq_identifier = (
+                                BigqueryTableIdentifier.from_string_name_with_default_project(
+                                    table_name, default_project=database_name
+                                )
+                            )
+                            database_name = bq_identifier.project_id
+                            schema_name = bq_identifier.dataset
+                            table_name = bq_identifier.table
+                        except ValueError:
+                            pass
                     name_components = [database_name, schema_name, table_name]
                     return [
                         builder.make_dataset_urn_with_platform_instance(

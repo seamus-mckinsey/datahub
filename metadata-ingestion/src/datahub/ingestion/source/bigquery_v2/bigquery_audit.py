@@ -109,6 +109,44 @@ class BigqueryTableIdentifier:
         table = parts[2].split("$", 1)[0]
         return cls(parts[0], parts[1], table)
 
+    @classmethod
+    def from_string_name_with_default_project(
+        cls, table: str, default_project: Optional[str]
+    ) -> "BigqueryTableIdentifier":
+        """
+        Parse BigQuery table names that may be either:
+        - project.dataset.table
+        - dataset.table
+        - dataset.INFORMATION_SCHEMA.TABLE (no project)
+
+        If the project is missing, default_project must be provided.
+        """
+        parts = table.split(".", maxsplit=2)
+        if len(parts) == 1:
+            raise ValueError(f"invalid BigQuery table name: {table}")
+
+        if len(parts) == 2:
+            if not default_project:
+                raise ValueError(
+                    f"default_project is required for BigQuery table name: {table}"
+                )
+            project = default_project
+            dataset, table_name = parts
+        else:
+            if parts[1].upper() == "INFORMATION_SCHEMA":
+                if not default_project:
+                    raise ValueError(
+                        f"default_project is required for BigQuery table name: {table}"
+                    )
+                project = default_project
+                dataset = parts[0]
+                table_name = ".".join(parts[1:])
+            else:
+                project, dataset, table_name = parts
+
+        table_name = table_name.split("$", 1)[0]
+        return cls(project, dataset, table_name)
+
     def raw_table_name(self):
         return f"{self.project_id}.{self.dataset}.{self.table}"
 

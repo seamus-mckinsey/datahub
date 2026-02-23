@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pydantic
+import pytest
 
 from datahub.ingestion.api.common import PipelineContext
 from datahub.ingestion.source.metabase import (
@@ -135,3 +136,65 @@ def test_fail_session_delete(mock_post, mock_get, mock_delete):
     metabase_source.close()
 
     mock_report.report_failure.assert_called_once()
+
+
+class StubMetabaseSource(MetabaseSource):
+    def __init__(
+        self,
+        ctx: PipelineContext,
+        config: MetabaseConfig,
+        datasource_tuple,
+        source_table_tuple,
+    ):
+        self.config = config
+        self.report = MetabaseReport()
+        self._datasource_tuple = datasource_tuple
+        self._source_table_tuple = source_table_tuple
+
+    def get_datasource_from_id(self, datasource_id):  # type: ignore[override]
+        return self._datasource_tuple
+
+    def get_source_table_from_id(self, table_id):  # type: ignore[override]
+        return self._source_table_tuple
+
+
+@pytest.mark.parametrize(
+    "schema_name,table_name,expected_table",
+    [
+        ("dw-color", "marts.care_program_participants", "marts.care_program_participants"),
+        (
+            "dw-color",
+            "dw-color.marts.care_program_participants",
+            "marts.care_program_participants",
+        ),
+        (
+            "dw-color",
+            "region-us.INFORMATION_SCHEMA.JOBS_BY_PROJECT",
+            "region-us.INFORMATION_SCHEMA.JOBS_BY_PROJECT",
+        ),
+    ],
+)
+def test_mbql_bigquery_table_name_parsing(schema_name, table_name, expected_table):
+    ctx = PipelineContext(run_id="test-metabase-bq-mbql")
+    config = MetabaseConfig()
+
+    source = StubMetabaseSource(
+        ctx,
+        config,
+        datasource_tuple=("bigquery", "dw-color", None, "dw-color"),
+        source_table_tuple=(schema_name, table_name),
+    )
+
+    card_details = {
+        "database_id": 1,
+        "dataset_query": {"type": "query", "query": {"source-table": 123}},
+    }
+
+    result = source.get_datasource_urn(card_details)
+    assert result is not None
+
+    expected_urn = (
+        "urn:li:dataset:(urn:li:dataPlatform:bigquery,"
+        f"dw-color.{expected_table},{config.env})"
+    )
+    assert result[0] == expected_urn
